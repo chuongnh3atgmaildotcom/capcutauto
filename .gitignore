@@ -11,4 +11,4 @@ dist/
 
 .venv/
 venv/
-pyjianying.log
+*.log

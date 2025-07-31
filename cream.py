@@ -3,7 +3,7 @@ import sys
 import logging
 import pyJianYingDraft as draft
 from pyJianYingDraft import trange, VideoMaterial, ShrinkMode, ExtendMode
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any
 
 # Redirect stderr to the log file
 log_file = open('cream.log', 'a')
@@ -11,15 +11,16 @@ sys.stderr = log_file
 
 logging.basicConfig(stream=log_file, level=logging.DEBUG, format='%(asctime)s %(levelname)s %(message)s')
 
-def check_paths(draft_folder_path: str, export_dir: str, replacements: List[Tuple[int, str]]) -> None:
+def check_paths(draft_folder_path: str, export_dir: str, targets: List[Dict[str, Any]]) -> None:
     if not os.path.exists(draft_folder_path):
         raise FileNotFoundError(f"Draft folder path does not exist: {draft_folder_path}")
     if not os.path.exists(export_dir):
         logging.debug(f"Export directory does not exist, creating: {export_dir}")
         os.makedirs(export_dir, exist_ok=True)
-    for _, path in replacements:
-        if not os.path.isfile(path):
-            raise FileNotFoundError(f"Replacement file does not exist: {path}")
+    for target in targets:
+        for _, path in target['replacements']:
+            if not os.path.isfile(path):
+                raise FileNotFoundError(f"Replacement file does not exist: {path}")
 
 def load_existing_project(project_path: str) -> draft.ScriptFile:
     json_path = os.path.normpath(os.path.join(project_path, "draft_content.json"))
@@ -67,14 +68,18 @@ def update_filter_strength(script: draft.ScriptFile, strength_percent: int) -> N
     script.save()
     logging.debug(f'Filter strength set to {strength_percent}%')
 
-def process_projects(draft_folder_path: str, project_names: List[str], replacements: List[Tuple[int, str]], export_dir: str) -> None:
-    check_paths(draft_folder_path, export_dir, replacements)
-    for name in project_names:
-        target_name = name.rsplit('_', 1)[0] + '_5'
-        logging.debug(f'Processing project: {name} -> {target_name}')
-        script = clone_project(draft_folder_path, name, target_name)
-        replace_main_track_materials(script, replacements)
-        update_filter_strength(script, strength_percent=2)
+def process_targets(draft_folder_path: str, source_name: str, targets: List[Dict[str, Any]], export_dir: str) -> None:
+    check_paths(draft_folder_path, export_dir, targets)
+    for target in targets:
+        target_name = target['name']
+        replacements = target.get('replacements', [])
+        filter_strength = target.get('filter_strength', 100)
+
+        logging.debug(f'Processing target project: {target_name}')
+        script = clone_project(draft_folder_path, source_name, target_name)
+        if replacements:
+            replace_main_track_materials(script, replacements)
+        update_filter_strength(script, strength_percent=filter_strength)
         # export_path = os.path.normpath(os.path.join(export_dir, f"{target_name}.mp4"))
         # logging.debug(f'Exporting project {target_name} to {export_path}')
         # script.export(export_path)
@@ -82,13 +87,38 @@ def process_projects(draft_folder_path: str, project_names: List[str], replaceme
 if __name__ == "__main__":
     draft_folder_path = r"C:\\Users\\Admin\\AppData\\Local\\CapCut\\User Data\\Projects\\com.lveditor.draft"
     export_dir = r"C:\\Users\\Admin\\Downloads\\tmp\\vid\\kem\\final"
-    project_list = [
-        "b3"
+    source_project_name = "b3"
+
+    target_projects = [
+        {
+            "name": "m3",
+            "replacements": [
+                [4, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\melasma\g5_kling_m1_desub.mp4"],
+                [5, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\melasma\mf_open_1.mp4"],
+                [6, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\melasma\mf_open_2.mp4"],
+            ],
+            "filter_strength": 2
+        },
+        {
+            "name": "ss3",
+            "replacements": [
+                [4, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\sun\g5_kling_ss1.mp4"],
+                [5, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\sun\ssf_1.mp4"],
+                [6, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\sun\ssf_2.mp4"],
+            ],
+            "filter_strength": 7
+        },
+                {
+            "name": "sr3",
+            "replacements": [
+                [4, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\serum\g5_kling_sr1.mp4"],
+                [5, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\serum\srf_1.mp4"],
+                [6, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\serum\srf_2.mp4"],
+            ],
+            "filter_strength": 15
+        },
     ]
 
-    replacements = [
-        [0, "/Users/chuongnh/Downloads/cream/vidkem/hook/Joane_dance.mp4"],
-    ]
-    process_projects(draft_folder_path, project_list, replacements, export_dir)
+    process_targets(draft_folder_path, source_project_name, target_projects, export_dir)
 
 log_file.close()

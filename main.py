@@ -63,14 +63,14 @@ if __name__ == "__main__":
     project_list = [
         "2D-FCL-VTT-VVV-10062501_2",
         "2D-FCL-VTT-VVV-10062502_2",
-        "2D-JLA-NVVC-HBP-170625_2"
+        "2D-JLA-NVVC-HBP-170625_2",
         "2D-JLA-VTT-VVV-110625_2",
         "2D-PDT-NVVC-HBP-170625_black_2",
-        "2D-PDT-NVVC-HBP-170625_white_2",
+        # "2D-PDT-NVVC-HBP-170625_white_2",
         "2D-TV-LNTH-472501_2",
         "2D-VC-LNTH-472501_2",
         "2D-VC-SYP-BP-260601_2",
-        # "2D-VC-SYP-BP-260602_2",
+        "2D-VC-SYP-BP-260602_2",
     ]
     
     replacements = [

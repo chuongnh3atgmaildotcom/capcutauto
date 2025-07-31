@@ -4,6 +4,8 @@ import logging
 import pyJianYingDraft as draft
 from pyJianYingDraft import trange, VideoMaterial, ShrinkMode, ExtendMode
 from typing import List, Tuple, Dict, Any
+import json
+from dataclasses import asdict, is_dataclass
 
 # Redirect stderr to the log file
 log_file = open('cream.log', 'a')
@@ -47,26 +49,73 @@ def replace_main_track_materials(script: draft.ScriptFile, replacements: List[Tu
     for clip_index, new_path in replacements:
         logging.debug(f'Replacing clip index {clip_index} with {new_path}')
         new_material = VideoMaterial(new_path)
+        target_duration = video_track.segments[clip_index].duration
         script.replace_material_by_seg(
             video_track,
             clip_index,
             new_material,
-            source_timerange=None,
+            source_timerange=trange(0, target_duration),
             handle_shrink=ShrinkMode.cut_tail,
-            handle_extend=ExtendMode.push_tail
+            handle_extend=ExtendMode.cut_material_tail
         )
-        logging.debug(f'Replaced clip {clip_index} with {new_path}')
+        logging.debug(f'Replaced clip {clip_index} with {new_path} at duration={target_duration}')
     script.save()
     logging.debug('Project saved after replacements')
 
-def update_filter_strength(script: draft.ScriptFile, strength_percent: int) -> None:
-    for fx in script.materials.filters:
-        if hasattr(fx, 'strength'):
-            old = fx.strength
-            fx.strength = strength_percent / 100.0
-            logging.debug(f"Updated filter strength from {old} to {fx.strength}")
-    script.save()
-    logging.debug(f'Filter strength set to {strength_percent}%')
+# def deep_log_materials(script: draft.ScriptFile):
+#     try:
+#         logging.debug("MATERIALS FIELDS:")
+#         for attr in dir(script.materials):
+#             if attr.startswith("_"):
+#                 continue
+#             val = getattr(script.materials, attr)
+#             if isinstance(val, list):
+#                 logging.debug(f"{attr}: list of {len(val)}")
+#                 for i, item in enumerate(val[:5]):
+#                     logging.debug(f"  {attr}[{i}] = {repr(item)}")
+#             else:
+#                 logging.debug(f"{attr}: {repr(val)}")
+#     except Exception as e:
+#         logging.error(f"Failed to inspect materials: {e}")
+
+# def log_segment_effects(script: draft.ScriptFile):
+#     try:
+#         video_track = script.get_imported_track(draft.TrackType.video, index=0)
+#         for idx, seg in enumerate(video_track.segments):
+#             logging.debug(f"Segment {idx} id={seg.material_id}, duration={seg.duration}")
+#             for attr in dir(seg):
+#                 if attr.startswith("_"):
+#                     continue
+#                 val = getattr(seg, attr)
+#                 if isinstance(val, list):
+#                     logging.debug(f"  {attr}: list of {len(val)}")
+#                     for i, item in enumerate(val[:3]):
+#                         logging.debug(f"    {attr}[{i}] = {repr(item)}")
+#                         for fx_attr in dir(item):
+#                             if not fx_attr.startswith('_'):
+#                                 logging.debug(f"      {fx_attr} = {getattr(item, fx_attr)}")
+#                 else:
+#                     logging.debug(f"  {attr}: {repr(val)}")
+#     except Exception as e:
+#         logging.error(f"Failed to inspect segments: {e}")
+
+# def update_filter_strength(script: draft.ScriptFile, strength_percent: int) -> None:
+#     updated = False
+#     # logging.debug(script.materials.export_json())
+#     # deep_log_materials(script)
+#     # log_segment_effects(script)
+#     # sys.exit()
+#     if hasattr(script, "materials") and hasattr(script.materials, "effects"):
+#         for fx in script.materials.effects:
+#             if getattr(fx, "type", None) == "filter" and hasattr(fx, "value"):
+#                 old = fx.value
+#                 fx.value = strength_percent / 100.0
+#                 logging.debug(f"Updated FILTER strength from {old} to {fx.value} (effect_id={getattr(fx, 'effect_id', '?')})")
+#                 updated = True
+#     if not updated:
+#         logging.debug("No filter strength updated – no matching 'filter' effect found")
+#     script.save()
+#     logging.debug(f'Filter strength set to {strength_percent}%')
 
 def process_targets(draft_folder_path: str, source_name: str, targets: List[Dict[str, Any]], export_dir: str) -> None:
     check_paths(draft_folder_path, export_dir, targets)
@@ -79,7 +128,7 @@ def process_targets(draft_folder_path: str, source_name: str, targets: List[Dict
         script = clone_project(draft_folder_path, source_name, target_name)
         if replacements:
             replace_main_track_materials(script, replacements)
-        update_filter_strength(script, strength_percent=filter_strength)
+        # update_filter_strength(script, strength_percent=filter_strength)
         # export_path = os.path.normpath(os.path.join(export_dir, f"{target_name}.mp4"))
         # logging.debug(f'Exporting project {target_name} to {export_path}')
         # script.export(export_path)

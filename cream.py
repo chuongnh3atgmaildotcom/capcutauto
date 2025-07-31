@@ -7,6 +7,10 @@ from typing import List, Tuple, Dict, Any
 import json
 from dataclasses import asdict, is_dataclass
 
+# Constants for duration behavior
+SHIFT_NO = 0  # Keep duration and segment positions
+SHIFT_YES = 1  # Allow timeline shift if necessary
+
 # Redirect stderr to the log file
 log_file = open('cream.log', 'a')
 sys.stderr = log_file
@@ -20,9 +24,9 @@ def check_paths(draft_folder_path: str, export_dir: str, targets: List[Dict[str,
         logging.debug(f"Export directory does not exist, creating: {export_dir}")
         os.makedirs(export_dir, exist_ok=True)
     for target in targets:
-        for _, path in target['replacements']:
-            if not os.path.isfile(path):
-                raise FileNotFoundError(f"Replacement file does not exist: {path}")
+        for replacement in target['replacements']:
+            if not os.path.isfile(replacement[1]):
+                raise FileNotFoundError(f"Replacement file does not exist: {replacement[1]}")
 
 def load_existing_project(project_path: str) -> draft.ScriptFile:
     json_path = os.path.normpath(os.path.join(project_path, "draft_content.json"))
@@ -40,27 +44,63 @@ def clone_project(draft_folder_path: str, source_name: str, target_name: str) ->
     logging.debug(f'Cloned project: {target_name}')
     return script
 
-def replace_main_track_materials(script: draft.ScriptFile, replacements: List[Tuple[int, str]]) -> None:
+def replace_main_track_materials(script: draft.ScriptFile, replacements: List[Tuple[int, str, int]]) -> None:
     video_track = script.get_imported_track(draft.TrackType.video, index=0)
     logging.debug(f'Video track info: {video_track}')
     logging.debug('Inspecting current video track materials:')
     for idx, seg in enumerate(video_track.segments):
         logging.debug(f'Clip {idx}: material_id={seg.material_id}, duration={seg.duration}')
-    for clip_index, new_path in replacements:
-        logging.debug(f'Replacing clip index {clip_index} with {new_path}')
+    for replacement in replacements:
+        clip_index, new_path, shift_mode = replacement
+        logging.debug(f'Replacing clip index {clip_index} with {new_path}, duration_mode={shift_mode}')
         new_material = VideoMaterial(new_path)
         target_duration = video_track.segments[clip_index].duration
+
+        if shift_mode == SHIFT_NO:
+            shrink = ShrinkMode.cut_tail
+            extend = ExtendMode.cut_material_tail
+        else:
+            shrink = ShrinkMode.cut_tail_align
+            extend = ExtendMode.push_tail
+
         script.replace_material_by_seg(
             video_track,
             clip_index,
             new_material,
-            source_timerange=trange(0, target_duration),
-            handle_shrink=ShrinkMode.cut_tail,
-            handle_extend=ExtendMode.cut_material_tail
+            source_timerange=trange(0, target_duration) if shift_mode == SHIFT_NO else None,
+            handle_shrink=shrink,
+            handle_extend=extend
         )
-        logging.debug(f'Replaced clip {clip_index} with {new_path} at duration={target_duration}')
+        logging.debug(f'Replaced clip {clip_index} with {new_path} using mode {shift_mode}')
     script.save()
     logging.debug('Project saved after replacements')
+
+# shrink - What to do when the new material is shorter than the original segment:
+#     cut_head:
+#     Cut the head - Trim the start of the segment by moving the start time later.
+
+#     cut_tail:
+#     Cut the tail - Trim the end of the segment by moving the end time earlier (default in your script).
+
+#     cut_tail_align:
+#     Cut the tail and shift everything after - Like cut_tail, but also shifts all following segments earlier to eliminate any resulting gap.
+
+#     shrink:
+#     Shrink both ends toward the center - The center timestamp of the original segment is preserved, and both start and end times move inward to shorten the segment symmetrically.
+
+# ExtendMode - What to do when the new material is longer than the original segment:
+
+#     cut_material_tail:
+#     Trim the end of the new material so it matches the original segment duration. It overrides any source_timerange. This is the safest and always succeeds.
+
+#     extend_head:
+#     Try to extend the start of the segment earlier. This can fail if there's another clip right before.
+
+#     extend_tail:
+#     Try to extend the end of the segment later. This can fail if there's another clip after it.
+
+#     push_tail:
+#     Extend the end and push later segments forward to make space. This always succeeds.
 
 # def deep_log_materials(script: draft.ScriptFile):
 #     try:
@@ -122,7 +162,7 @@ def process_targets(draft_folder_path: str, source_name: str, targets: List[Dict
     for target in targets:
         target_name = target['name']
         replacements = target.get('replacements', [])
-        filter_strength = target.get('filter_strength', 100)
+        # filter_strength = target.get('filter_strength', 100)
 
         logging.debug(f'Processing target project: {target_name}')
         script = clone_project(draft_folder_path, source_name, target_name)
@@ -142,27 +182,27 @@ if __name__ == "__main__":
         {
             "name": "m3",
             "replacements": [
-                [4, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\melasma\g5_kling_m1_desub.mp4"],
-                [5, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\melasma\mf_open_1.mp4"],
-                [6, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\melasma\mf_open_2.mp4"],
+                [4, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\melasma\g5_kling_m1_desub.mp4", SHIFT_NO],
+                [5, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\melasma\mf_open_1.mp4", SHIFT_NO],
+                [6, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\melasma\mf_open_2.mp4", SHIFT_NO],
             ],
             "filter_strength": 2
         },
         {
             "name": "ss3",
             "replacements": [
-                [4, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\sun\g5_kling_ss1.mp4"],
-                [5, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\sun\ssf_1.mp4"],
-                [6, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\sun\ssf_2.mp4"],
+                [4, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\sun\g5_kling_ss1.mp4", SHIFT_NO],
+                [5, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\sun\ssf_1.mp4", SHIFT_NO],
+                [6, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\sun\ssf_2.mp4", SHIFT_NO],
             ],
             "filter_strength": 7
         },
                 {
             "name": "sr3",
             "replacements": [
-                [4, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\serum\g5_kling_sr1.mp4"],
-                [5, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\serum\srf_1.mp4"],
-                [6, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\serum\srf_2.mp4"],
+                [4, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\serum\g5_kling_sr1.mp4", SHIFT_NO],
+                [5, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\serum\srf_1.mp4", SHIFT_NO],
+                [6, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\serum\srf_2.mp4", SHIFT_NO],
             ],
             "filter_strength": 15
         },

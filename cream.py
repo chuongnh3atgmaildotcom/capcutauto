@@ -2,17 +2,17 @@ import os
 import sys
 import logging
 import pyJianYingDraft as draft
-from pyJianYingDraft import trange, VideoMaterial, ShrinkMode, ExtendMode
+from pyJianYingDraft import trange, VideoMaterial, ShrinkMode, ExtendMode, TrackType
 from typing import List, Tuple, Dict, Any
 import json
 from dataclasses import asdict, is_dataclass
 
-# Constants for duration behavior
+# Constants for shifting behavior
 SHIFT_NO = 0  # Keep duration and segment positions
 SHIFT_YES = 1  # Allow timeline shift if necessary
 
 # Redirect stderr to the log file
-log_file = open('cream.log', 'a')
+log_file = open('cream.log', 'a', encoding='utf-8')
 sys.stderr = log_file
 
 logging.basicConfig(stream=log_file, level=logging.DEBUG, format='%(asctime)s %(levelname)s %(message)s')
@@ -52,7 +52,7 @@ def replace_main_track_materials(script: draft.ScriptFile, replacements: List[Tu
         logging.debug(f'Clip {idx}: material_id={seg.material_id}, duration={seg.duration}')
     for replacement in replacements:
         clip_index, new_path, shift_mode = replacement
-        logging.debug(f'Replacing clip index {clip_index} with {new_path}, duration_mode={shift_mode}')
+        logging.debug(f'Replacing clip index {clip_index} with {new_path}, shift_mode={shift_mode}')
         new_material = VideoMaterial(new_path)
         target_duration = video_track.segments[clip_index].duration
 
@@ -71,143 +71,86 @@ def replace_main_track_materials(script: draft.ScriptFile, replacements: List[Tu
             handle_shrink=shrink,
             handle_extend=extend
         )
-        logging.debug(f'Replaced clip {clip_index} with {new_path} using mode {shift_mode}')
+        logging.debug(f'Replaced clip {clip_index} with {new_path} using shift_mode {shift_mode}')
     script.save()
     logging.debug('Project saved after replacements')
 
-# shrink - What to do when the new material is shorter than the original segment:
-#     cut_head:
-#     Cut the head - Trim the start of the segment by moving the start time later.
-
-#     cut_tail:
-#     Cut the tail - Trim the end of the segment by moving the end time earlier (default in your script).
-
-#     cut_tail_align:
-#     Cut the tail and shift everything after - Like cut_tail, but also shifts all following segments earlier to eliminate any resulting gap.
-
-#     shrink:
-#     Shrink both ends toward the center - The center timestamp of the original segment is preserved, and both start and end times move inward to shorten the segment symmetrically.
-
-# ExtendMode - What to do when the new material is longer than the original segment:
-
-#     cut_material_tail:
-#     Trim the end of the new material so it matches the original segment duration. It overrides any source_timerange. This is the safest and always succeeds.
-
-#     extend_head:
-#     Try to extend the start of the segment earlier. This can fail if there's another clip right before.
-
-#     extend_tail:
-#     Try to extend the end of the segment later. This can fail if there's another clip after it.
-
-#     push_tail:
-#     Extend the end and push later segments forward to make space. This always succeeds.
-
-# def deep_log_materials(script: draft.ScriptFile):
-#     try:
-#         logging.debug("MATERIALS FIELDS:")
-#         for attr in dir(script.materials):
-#             if attr.startswith("_"):
-#                 continue
-#             val = getattr(script.materials, attr)
-#             if isinstance(val, list):
-#                 logging.debug(f"{attr}: list of {len(val)}")
-#                 for i, item in enumerate(val[:5]):
-#                     logging.debug(f"  {attr}[{i}] = {repr(item)}")
-#             else:
-#                 logging.debug(f"{attr}: {repr(val)}")
-#     except Exception as e:
-#         logging.error(f"Failed to inspect materials: {e}")
-
-# def log_segment_effects(script: draft.ScriptFile):
-#     try:
-#         video_track = script.get_imported_track(draft.TrackType.video, index=0)
-#         for idx, seg in enumerate(video_track.segments):
-#             logging.debug(f"Segment {idx} id={seg.material_id}, duration={seg.duration}")
-#             for attr in dir(seg):
-#                 if attr.startswith("_"):
-#                     continue
-#                 val = getattr(seg, attr)
-#                 if isinstance(val, list):
-#                     logging.debug(f"  {attr}: list of {len(val)}")
-#                     for i, item in enumerate(val[:3]):
-#                         logging.debug(f"    {attr}[{i}] = {repr(item)}")
-#                         for fx_attr in dir(item):
-#                             if not fx_attr.startswith('_'):
-#                                 logging.debug(f"      {fx_attr} = {getattr(item, fx_attr)}")
-#                 else:
-#                     logging.debug(f"  {attr}: {repr(val)}")
-#     except Exception as e:
-#         logging.error(f"Failed to inspect segments: {e}")
-
-# def update_filter_strength(script: draft.ScriptFile, strength_percent: int) -> None:
-#     updated = False
-#     # logging.debug(script.materials.export_json())
-#     # deep_log_materials(script)
-#     # log_segment_effects(script)
-#     # sys.exit()
-#     if hasattr(script, "materials") and hasattr(script.materials, "effects"):
-#         for fx in script.materials.effects:
-#             if getattr(fx, "type", None) == "filter" and hasattr(fx, "value"):
-#                 old = fx.value
-#                 fx.value = strength_percent / 100.0
-#                 logging.debug(f"Updated FILTER strength from {old} to {fx.value} (effect_id={getattr(fx, 'effect_id', '?')})")
-#                 updated = True
-#     if not updated:
-#         logging.debug("No filter strength updated – no matching 'filter' effect found")
-#     script.save()
-#     logging.debug(f'Filter strength set to {strength_percent}%')
+def replace_text(script: draft.ScriptFile, replacements: List[Tuple[int, str]]):
+    try:
+        text_track = script.get_imported_track(track_type=TrackType.text, index=0)
+        logging.debug(f"Text track loaded: name={getattr(text_track, 'name', None)}, index={getattr(text_track, 'index', None)}, segments={len(text_track.segments)}")
+        for idx, new_text in replacements:
+            script.replace_text(text_track, idx, new_text)
+            logging.debug(f"Text segment {idx} replaced with: {new_text}")
+        script.save()
+    except Exception as e:
+        logging.error(f"Failed to replace text: {type(e).__name__}: {e}")
 
 def process_targets(draft_folder_path: str, source_name: str, targets: List[Dict[str, Any]], export_dir: str) -> None:
     check_paths(draft_folder_path, export_dir, targets)
     for target in targets:
         target_name = target['name']
         replacements = target.get('replacements', [])
-        # filter_strength = target.get('filter_strength', 100)
+        text_replacements = target.get('text_replacements', [])
 
         logging.debug(f'Processing target project: {target_name}')
         script = clone_project(draft_folder_path, source_name, target_name)
+        # script.inspect_material()
+        # sys.exit()
         if replacements:
             replace_main_track_materials(script, replacements)
-        # update_filter_strength(script, strength_percent=filter_strength)
-        # export_path = os.path.normpath(os.path.join(export_dir, f"{target_name}.mp4"))
-        # logging.debug(f'Exporting project {target_name} to {export_path}')
-        # script.export(export_path)
+        if text_replacements:
+            replace_text(script, text_replacements)
 
 if __name__ == "__main__":
     draft_folder_path = r"C:\\Users\\Admin\\AppData\\Local\\CapCut\\User Data\\Projects\\com.lveditor.draft"
     export_dir = r"C:\\Users\\Admin\\Downloads\\tmp\\vid\\kem\\final"
-    source_project_name = "b3"
+    source_project_name = "b3_h1_o3"
 
-    target_projects = [
+    projects = [
         {
-            "name": "m3",
+            "name": "m3_h1_o3",
             "replacements": [
-                [4, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\melasma\g5_kling_m1_desub.mp4", SHIFT_NO],
-                [5, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\melasma\mf_open_1.mp4", SHIFT_NO],
-                [6, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\melasma\mf_open_2.mp4", SHIFT_NO],
+                [5, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\melasma\g5_kling_m1_desub.mp4", SHIFT_NO],
+                [6, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\melasma\mf_open_1.mp4", SHIFT_NO],
+                [7, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\melasma\mf_open_2.mp4", SHIFT_NO],
+            ],
+            "text_replacements": [
+                [0, "Aku juga dulu begitu\nsampai nemu ini "],
+                [1, "Beli melasma Sekarang Diskon Besa"],
             ],
             "filter_strength": 2
         },
         {
-            "name": "ss3",
+            "name": "ss3_h1_o3",
             "replacements": [
-                [4, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\sun\g5_kling_ss1.mp4", SHIFT_NO],
-                [5, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\sun\ssf_1.mp4", SHIFT_NO],
-                [6, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\sun\ssf_2.mp4", SHIFT_NO],
+                [5, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\sun\g5_kling_ss1.mp4", SHIFT_NO],
+                [6, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\sun\ssf_1.mp4", SHIFT_NO],
+                [7, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\sun\ssf_2.mp4", SHIFT_NO],
+            ],
+            "text_replacements": [
+                [0, "Kulitku makin rusak tiap\nhari karena matahari\nsampai aku ganti sunscreen "],
+                [1, "Beli sunscreen Sekarang Diskon Besa"],
             ],
             "filter_strength": 7
         },
-                {
-            "name": "sr3",
+        {
+            "name": "sr3_h1_o3",
             "replacements": [
-                [4, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\serum\g5_kling_sr1.mp4", SHIFT_NO],
-                [5, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\serum\srf_1.mp4", SHIFT_NO],
-                [6, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\serum\srf_2.mp4", SHIFT_NO],
+                [5, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\serum\g5_kling_sr1.mp4", SHIFT_NO],
+                [6, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\serum\srf_1.mp4", SHIFT_NO],
+                [7, r"C:\Users\Admin\Downloads\tmp\vid\kem\source\serum\srf_2.mp4", SHIFT_NO],
+            ],
+            "text_replacements": [
+                [0, "Bekas jerawat, tekstur kasar\nrasanya udah pasrah"],
+                [1, "Diskon\nBesar-besaran\nSekarang"],
             ],
             "filter_strength": 15
         },
     ]
 
-    process_targets(draft_folder_path, source_project_name, target_projects, export_dir)
+    for proj in projects:
+        source_name = proj.get("source", source_project_name)
+        process_targets(draft_folder_path, source_name, [proj], export_dir)
 
 log_file.close()
